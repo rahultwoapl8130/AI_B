@@ -4,7 +4,7 @@ from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_mongodb import MongoDBAtlasVectorSearch
-from langchain_openai import OpenAIEmbeddings
+from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
 from pymongo import MongoClient
 from core.config import settings
 
@@ -47,15 +47,15 @@ def clean_and_chunk(documents: List[Document]) -> List[Document]:
 
 def ingest_to_vector_store(chunks: List[Document]):
     """Embeds chunks and stores them in MongoDB Atlas."""
-    if not settings.MONGODB_URI or not settings.OPENAI_API_KEY:
-        print("Missing MONGODB_URI or OPENAI_API_KEY. Skipping ingestion.")
+    if not settings.MONGODB_URI or not settings.NVIDIA_API_KEY:
+        print("Missing MONGODB_URI or NVIDIA_API_KEY. Skipping ingestion.")
         return
         
     client = MongoClient(settings.MONGODB_URI)
     db = client[settings.PROJECT_NAME.replace(" ", "_")]
     collection = db["vector_knowledge_base"]
     
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embeddings = NVIDIAEmbeddings(model="NV-Embed-QA", api_key=settings.NVIDIA_API_KEY)
     
     # Create or update the vector store
     vector_search = MongoDBAtlasVectorSearch.from_documents(
