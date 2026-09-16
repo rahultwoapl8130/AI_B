@@ -1,19 +1,39 @@
 from graph.state import SupportState
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+from core.config import settings
 
-# In a real app, these nodes would call LLMs (e.g. ChatOpenAI).
-# For now, we stub the orchestrator and agent logic.
+# Initialize NVIDIA Llama 3 Model via OpenAI-compatible API
+def get_llm():
+    return ChatOpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=settings.NVIDIA_API_KEY,
+        model="meta/llama-3.1-70b-instruct",
+        temperature=0.3
+    )
 
 def intent_agent(state: SupportState) -> dict:
     """Analyzes the user's intent."""
-    last_message = state["messages"][-1].content.lower()
-    intent = "faq"
-    if "refund" in last_message or "cancel" in last_message:
-        intent = "billing"
-    elif "broken" in last_message or "error" in last_message:
-        intent = "technical"
-    elif "complain" in last_message or "angry" in last_message:
-        intent = "complaint"
+    last_message = state["messages"][-1].content
+    
+    # If no API key, fallback to simple logic
+    if not settings.NVIDIA_API_KEY:
+        intent = "faq"
+        if "refund" in last_message.lower(): intent = "billing"
+        elif "error" in last_message.lower(): intent = "technical"
+        return {"intent": intent}
+        
+    llm = get_llm()
+    prompt = f"Analyze this customer message and classify its intent as ONLY ONE of these words: [billing, technical, complaint, faq]. Message: '{last_message}'"
+    
+    response = llm.invoke(prompt)
+    intent = response.content.strip().lower()
+    
+    # Clean up response
+    if "billing" in intent: intent = "billing"
+    elif "technical" in intent: intent = "technical"
+    elif "complaint" in intent: intent = "complaint"
+    else: intent = "faq"
     
     return {"intent": intent}
 
@@ -21,7 +41,7 @@ def sentiment_agent(state: SupportState) -> dict:
     """Analyzes the sentiment of the message."""
     last_message = state["messages"][-1].content.lower()
     sentiment = "neutral"
-    if "angry" in last_message or "terrible" in last_message or "hate" in last_message:
+    if "angry" in last_message or "terrible" in last_message:
         sentiment = "negative"
     return {"sentiment": sentiment}
 
@@ -34,18 +54,30 @@ def priority_agent(state: SupportState) -> dict:
         priority = "Urgent"
     return {"priority": priority}
 
-# Domain Agents
+# Domain Agents (These now use the LLM to generate replies)
 def billing_agent(state: SupportState) -> dict:
-    response = AIMessage(content="I understand you have a billing question. Let me check your account.")
-    return {"messages": [response], "agent_outputs": {"billing_agent": "processed"}}
+    if settings.NVIDIA_API_KEY:
+        llm = get_llm()
+        response = llm.invoke(f"You are a billing support agent. Reply politely to: {state['messages'][-1].content}")
+        return {"messages": [response], "agent_outputs": {"billing_agent": "processed"}}
+    
+    return {"messages": [AIMessage(content="I understand you have a billing question. Let me check your account.")], "agent_outputs": {"billing_agent": "processed"}}
 
 def technical_agent(state: SupportState) -> dict:
-    response = AIMessage(content="I can help you with this technical issue. Could you share the error code?")
-    return {"messages": [response], "agent_outputs": {"technical_agent": "processed"}}
+    if settings.NVIDIA_API_KEY:
+        llm = get_llm()
+        response = llm.invoke(f"You are a technical support agent. Help troubleshoot: {state['messages'][-1].content}")
+        return {"messages": [response], "agent_outputs": {"technical_agent": "processed"}}
+        
+    return {"messages": [AIMessage(content="I can help you with this technical issue. Could you share the error code?")], "agent_outputs": {"technical_agent": "processed"}}
 
 def faq_agent(state: SupportState) -> dict:
-    response = AIMessage(content="Here is the information from our FAQ section.")
-    return {"messages": [response], "agent_outputs": {"faq_agent": "processed"}}
+    if settings.NVIDIA_API_KEY:
+        llm = get_llm()
+        response = llm.invoke(f"You are a general FAQ agent. Answer this question: {state['messages'][-1].content}")
+        return {"messages": [response], "agent_outputs": {"faq_agent": "processed"}}
+        
+    return {"messages": [AIMessage(content="Here is the information from our FAQ section.")], "agent_outputs": {"faq_agent": "processed"}}
 
 def escalation_agent(state: SupportState) -> dict:
     """Escalates to a human."""
