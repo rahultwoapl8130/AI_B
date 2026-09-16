@@ -66,6 +66,28 @@ def ingest_to_vector_store(chunks: List[Document]):
     )
     print(f"Successfully ingested {len(chunks)} chunks into MongoDB Atlas.")
 
+def process_single_file(file_path: str, filename: str):
+    """Processes a single file and ingests it."""
+    print(f"Processing uploaded file: {filename}")
+    documents = []
+    if file_path.endswith(".pdf"):
+        loader = PyPDFLoader(file_path)
+        documents.extend(loader.load())
+    elif file_path.endswith(".txt") or file_path.endswith(".md"):
+        loader = TextLoader(file_path)
+        documents.extend(loader.load())
+        
+    for doc in documents:
+        doc.metadata["source"] = filename
+        
+    chunks = clean_and_chunk(documents)
+    ingest_to_vector_store(chunks)
+    
+    # Clean up temp file
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        print(f"Deleted temp file: {file_path}")
+
 if __name__ == "__main__":
     # Example usage:
     # docs = load_documents("./data")

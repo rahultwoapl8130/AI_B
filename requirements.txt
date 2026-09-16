@@ -18,3 +18,4 @@ pypdf==4.0.2
 beautifulsoup4==4.12.3
 rank-bm25==0.2.2
 cohere==4.47
+python-multipart==0.0.9

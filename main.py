@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from middleware.logging import StructuredLoggingMiddleware
-from api.v1 import health, chat
+from api.v1 import health, chat, knowledge
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     # Include API Routers
     app.include_router(health.router, prefix=f"{settings.API_V1_STR}", tags=["health"])
     app.include_router(chat.router, prefix=f"{settings.API_V1_STR}", tags=["chat"])
+    app.include_router(knowledge.router, prefix=f"{settings.API_V1_STR}/knowledge", tags=["knowledge"])
 
     return app
 
