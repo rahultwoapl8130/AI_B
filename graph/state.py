@@ -1,26 +1,12 @@
-from typing import TypedDict, List, Dict, Any, Optional
+from typing import TypedDict, List, Annotated, Optional
 from langchain_core.messages import BaseMessage
+import operator
 
 class SupportState(TypedDict):
-    """
-    Represents the state of the LangGraph multi-agent workflow.
-    """
-    messages: List[BaseMessage]
-    ticket_id: Optional[str]
-    
-    # Analyzed features
+    messages: Annotated[List[BaseMessage], operator.add]
+    ticket_id: str
     intent: Optional[str]
     sentiment: Optional[str]
     priority: Optional[str]
-    
-    # Routing and execution
-    routed_agent: Optional[str]
     escalation_required: bool
-    
-    # Outputs and Memory
-    agent_outputs: Dict[str, Any]
-    tool_results: List[Dict[str, Any]]
-    
-    # Telemetry
-    latency_ms: Optional[int]
-    errors: List[str]
+    agent_outputs: dict
