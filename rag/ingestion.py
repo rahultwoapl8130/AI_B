@@ -1,7 +1,7 @@
 from typing import List
 import os
 from langchain_core.documents import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
