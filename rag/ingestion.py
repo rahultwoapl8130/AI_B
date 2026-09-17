@@ -1,16 +1,29 @@
 """
-Enterprise RAG Pipeline — Full NVIDIA Stack
-Uses: NVIDIAEmbeddings + MongoDB Atlas + NVIDIARerank + ChatNVIDIA
+Enterprise RAG Pipeline
+Uses: HuggingFace Embeddings (free, local) + MongoDB Atlas Vector Search + ChatNVIDIA
 """
-from typing import List, Optional
+from typing import List
 import os
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 from core.config import settings
+
+# Use a lightweight but powerful open-source embedding model
+# all-MiniLM-L6-v2: free, fast, no API key needed, works great for RAG
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+
+
+def get_embeddings():
+    """Returns HuggingFace embedding model (runs locally on the server)."""
+    return HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True}
+    )
 
 
 def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
@@ -24,11 +37,13 @@ def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
             loader = TextLoader(file_path)
             documents = loader.load()
         else:
-            print(f"Unsupported file type: {filename}")
-            return []
+            raise Exception(f"Unsupported file type: {filename}. Use PDF, TXT, or MD.")
     except Exception as e:
         print(f"Error loading file {filename}: {e}")
         raise Exception(f"Document parsing error: {str(e)}")
+
+    if not documents:
+        raise Exception(f"No content could be extracted from {filename}.")
 
     # Add source metadata
     for doc in documents:
@@ -48,24 +63,19 @@ def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
 
 def store_in_mongodb(chunks: List[Document]) -> bool:
     """
-    Embed chunks using NVIDIA NV-Embed-QA model
+    Embed chunks using free HuggingFace model
     and store in MongoDB Atlas Vector Search.
     """
     if not settings.MONGODB_URI:
-        raise Exception("ERROR: MONGODB_URI is not set in backend.")
-
-    if not settings.NVIDIA_API_KEY:
-        raise Exception("ERROR: NVIDIA_API_KEY is not set in backend.")
+        raise Exception("ERROR: MONGODB_URI is not set in backend environment variables.")
 
     if not chunks:
         raise Exception("No chunks to store. The document might be empty.")
 
     try:
-        embeddings = NVIDIAEmbeddings(
-            model="snowflake/arctic-embed-l",
-            api_key=settings.NVIDIA_API_KEY,
-            truncate="END"
-        )
+        # Free local embeddings — no API key required
+        embeddings = get_embeddings()
+        print(f"Using embedding model: {EMBEDDING_MODEL}")
 
         # MongoDB Atlas Vector Store
         client = MongoClient(settings.MONGODB_URI)
@@ -73,7 +83,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
         collection = db["vector_knowledge_base"]
 
         # Store documents with embeddings
-        vector_store = MongoDBAtlasVectorSearch.from_documents(
+        MongoDBAtlasVectorSearch.from_documents(
             documents=chunks,
             embedding=embeddings,
             collection=collection,
@@ -81,6 +91,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
         )
 
         print(f"SUCCESS: Stored {len(chunks)} chunks in MongoDB Atlas")
+        client.close()
         return True
 
     except Exception as e:
@@ -88,7 +99,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
         raise e
 
 
-def process_single_file(file_path: str, filename: str) -> bool:
+def process_single_file(file_path: str, filename: str):
     """Full pipeline: Load → Chunk → Embed → Store."""
     print(f"\n{'='*50}")
     print(f"Processing: {filename}")
@@ -96,34 +107,26 @@ def process_single_file(file_path: str, filename: str) -> bool:
 
     # Step 1: Load and chunk
     chunks = load_and_chunk_file(file_path, filename)
-    if not chunks:
-        raise Exception(f"Failed to extract text from {filename}. The file might be empty, corrupted, or unsupported.")
 
-    # Step 2: Store in MongoDB with NVIDIA embeddings
-    success = store_in_mongodb(chunks)
+    # Step 2: Store in MongoDB with HuggingFace embeddings
+    store_in_mongodb(chunks)
 
     # Step 3: Cleanup temp file
     if os.path.exists(file_path):
         os.remove(file_path)
         print(f"Cleaned up temp file: {file_path}")
 
-    return success
-
 
 def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
     """
-    Search the knowledge base using NVIDIA embeddings.
+    Search the knowledge base using the same HuggingFace embeddings.
     Returns top-k relevant document chunks.
     """
-    if not settings.MONGODB_URI or not settings.NVIDIA_API_KEY:
+    if not settings.MONGODB_URI:
         return []
 
     try:
-        embeddings = NVIDIAEmbeddings(
-            model="snowflake/arctic-embed-l",
-            api_key=settings.NVIDIA_API_KEY,
-            truncate="END"
-        )
+        embeddings = get_embeddings()
 
         client = MongoClient(settings.MONGODB_URI)
         db = client["techmart_db"]
@@ -137,6 +140,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
 
         results = vector_store.similarity_search(query, k=top_k)
         print(f"Found {len(results)} relevant chunks for query: '{query}'")
+        client.close()
         return results
 
     except Exception as e:

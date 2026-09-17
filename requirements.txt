@@ -23,3 +23,5 @@ rank-bm25==0.2.2
 cohere==5.5.8
 python-multipart==0.0.9
 openai==1.40.0
+sentence-transformers==2.7.0
+torch==2.3.0
