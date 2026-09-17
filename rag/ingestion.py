@@ -1,29 +1,24 @@
 """
 Enterprise RAG Pipeline
-Uses: HuggingFace Embeddings (free, local) + MongoDB Atlas Vector Search + ChatNVIDIA
+Uses: FastEmbed (lightweight, free, no GPU) + MongoDB Atlas Vector Search + ChatNVIDIA
 """
 from typing import List
 import os
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 from core.config import settings
 
-# Use a lightweight but powerful open-source embedding model
-# all-MiniLM-L6-v2: free, fast, no API key needed, works great for RAG
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# Lightweight, fast embedding model — no GPU, no API key needed
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 def get_embeddings():
-    """Returns HuggingFace embedding model (runs locally on the server)."""
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True}
-    )
+    """Returns FastEmbed embedding model (runs locally on the server, very lightweight)."""
+    return FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)
 
 
 def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
@@ -63,7 +58,7 @@ def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
 
 def store_in_mongodb(chunks: List[Document]) -> bool:
     """
-    Embed chunks using free HuggingFace model
+    Embed chunks using FastEmbed (free, local, lightweight)
     and store in MongoDB Atlas Vector Search.
     """
     if not settings.MONGODB_URI:
@@ -73,7 +68,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
         raise Exception("No chunks to store. The document might be empty.")
 
     try:
-        # Free local embeddings — no API key required
+        # Free local embeddings — no API key required, very lightweight
         embeddings = get_embeddings()
         print(f"Using embedding model: {EMBEDDING_MODEL}")
 
@@ -108,7 +103,7 @@ def process_single_file(file_path: str, filename: str):
     # Step 1: Load and chunk
     chunks = load_and_chunk_file(file_path, filename)
 
-    # Step 2: Store in MongoDB with HuggingFace embeddings
+    # Step 2: Store in MongoDB with FastEmbed embeddings
     store_in_mongodb(chunks)
 
     # Step 3: Cleanup temp file
@@ -119,7 +114,7 @@ def process_single_file(file_path: str, filename: str):
 
 def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
     """
-    Search the knowledge base using the same HuggingFace embeddings.
+    Search the knowledge base using the same FastEmbed embeddings.
     Returns top-k relevant document chunks.
     """
     if not settings.MONGODB_URI:
