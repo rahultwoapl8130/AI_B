@@ -1,14 +1,13 @@
 from graph.state import SupportState
 from langchain_core.messages import AIMessage
-from langchain_openai import ChatOpenAI
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from core.config import settings
 
 def get_llm():
-    """NVIDIA Llama 3.1 via OpenAI-compatible API."""
-    return ChatOpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=settings.NVIDIA_API_KEY,
+    """NVIDIA Llama 3.1 via native ChatNVIDIA API."""
+    return ChatNVIDIA(
         model="meta/llama-3.1-70b-instruct",
+        api_key=settings.NVIDIA_API_KEY,
         temperature=0.3,
         max_tokens=512
     )
