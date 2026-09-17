@@ -13,20 +13,15 @@ def get_llm():
     )
 
 def get_rag_context(query: str) -> str:
-    """Retrieve relevant context from MongoDB knowledge base."""
+    """Retrieve highly relevant context using Enterprise Hybrid RAG."""
     try:
-        from rag.ingestion import search_knowledge_base
-        docs = search_knowledge_base(query, top_k=5)
-        if docs:
-            context_parts = []
-            for i, d in enumerate(docs, 1):
-                source = d.metadata.get("source", "Knowledge Base")
-                context_parts.append(f"[Source {i}: {source}]\n{d.page_content}")
-            context = "\n\n".join(context_parts)
-            print(f"RAG: Found {len(docs)} relevant chunks")
+        from rag.retrieval import get_enterprise_context
+        context = get_enterprise_context(query, top_k=3)
+        if context:
+            print("Enterprise RAG: Successfully retrieved and reranked context.")
             return context
     except Exception as e:
-        print(f"RAG search failed: {e}")
+        print(f"Enterprise RAG search failed: {e}")
     return ""
 
 def intent_agent(state: SupportState) -> dict:
@@ -153,11 +148,14 @@ Do NOT use any general knowledge or outside information.
 If the specific answer is not found in the context, say exactly:
 "I couldn't find information about that in our uploaded knowledge base documents. Please contact support for more help."
 
+CRITICAL: You MUST include inline citations for every fact using the exact citation block provided in the context. 
+Example format: "Carl Pei founded Nothing in 2020 (Citation: nothing marketing.pdf | Category: general | v1.0)."
+
 DOCUMENT CONTEXT:
 {rag_context}
 
 Customer question: {query}
-Give a clear, accurate answer using ONLY the above document context."""
+Give a clear, accurate answer with citations using ONLY the above document context."""
             else:
                 prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
 Our knowledge base does not currently have documents relevant to this question.

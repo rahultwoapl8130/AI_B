@@ -1,143 +1,114 @@
 """
-Enterprise RAG Pipeline
-Uses: FastEmbed (lightweight, free, no GPU) + MongoDB Atlas Vector Search + ChatNVIDIA
+Phase 6: Enterprise RAG Ingestion Pipeline
+Supports: PDF, DOCX, MD, HTML, CSV
+Enhances Metadata: version, effective_date, access_level, etc.
 """
 from typing import List
 import os
+import datetime
+import uuid
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
+from langchain_community.document_loaders import (
+    PyPDFLoader, 
+    TextLoader, 
+    Docx2txtLoader, 
+    CSVLoader,
+    BSHTMLLoader
+)
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 from core.config import settings
 
-# Lightweight, fast embedding model — no GPU, no API key needed
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
-
 def get_embeddings():
-    """Returns FastEmbed embedding model (runs locally on the server, very lightweight)."""
+    """Returns FastEmbed embedding model (local, lightweight)."""
     return FastEmbedEmbeddings(model_name=EMBEDDING_MODEL)
 
-
 def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
-    """Load a file and split into chunks."""
+    """Parse various file formats and chunk them with enriched metadata."""
     documents = []
     try:
         if file_path.endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-            documents = loader.load()
+            documents = PyPDFLoader(file_path).load()
         elif file_path.endswith((".txt", ".md")):
-            loader = TextLoader(file_path)
-            documents = loader.load()
+            documents = TextLoader(file_path).load()
+        elif file_path.endswith(".docx"):
+            documents = Docx2txtLoader(file_path).load()
+        elif file_path.endswith(".csv"):
+            documents = CSVLoader(file_path).load()
+        elif file_path.endswith((".html", ".htm")):
+            documents = BSHTMLLoader(file_path).load()
         else:
-            raise Exception(f"Unsupported file type: {filename}. Use PDF, TXT, or MD.")
+            raise Exception(f"Unsupported file format: {filename}")
     except Exception as e:
-        print(f"Error loading file {filename}: {e}")
+        print(f"Error loading {filename}: {e}")
         raise Exception(f"Document parsing error: {str(e)}")
 
     if not documents:
-        raise Exception(f"No content could be extracted from {filename}.")
+        raise Exception(f"No content extracted from {filename}.")
 
-    # Add source metadata
+    # Metadata Extraction Pipeline
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     for doc in documents:
+        doc.metadata["document_id"] = str(uuid.uuid4())
         doc.metadata["source"] = filename
-        doc.metadata["category"] = "knowledge_base"
+        doc.metadata["version"] = "1.0"
+        doc.metadata["effective_date"] = current_date
+        doc.metadata["access_level"] = "public"
+        
+        # Simple categorization heuristic
+        filename_lower = filename.lower()
+        if "policy" in filename_lower: doc.metadata["category"] = "policy"
+        elif "faq" in filename_lower: doc.metadata["category"] = "faq"
+        elif "manual" in filename_lower: doc.metadata["category"] = "manual"
+        elif "price" in filename_lower: doc.metadata["category"] = "pricing"
+        else: doc.metadata["category"] = "general"
 
-    # Split into chunks
+    # Chunking
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100,
+        chunk_size=1000,
+        chunk_overlap=200,
         separators=["\n\n", "\n", ".", " ", ""]
     )
     chunks = splitter.split_documents(documents)
     print(f"Created {len(chunks)} chunks from {filename}")
     return chunks
 
-
 def store_in_mongodb(chunks: List[Document]) -> bool:
-    """
-    Embed chunks using FastEmbed (free, local, lightweight)
-    and store in MongoDB Atlas Vector Search.
-    """
+    """Embed and store chunks in MongoDB Atlas Vector Search."""
     if not settings.MONGODB_URI:
-        raise Exception("ERROR: MONGODB_URI is not set in backend environment variables.")
-
+        raise Exception("MONGODB_URI not set.")
     if not chunks:
-        raise Exception("No chunks to store. The document might be empty.")
+        raise Exception("No chunks to store.")
 
     try:
-        # Free local embeddings — no API key required, very lightweight
         embeddings = get_embeddings()
-        print(f"Using embedding model: {EMBEDDING_MODEL}")
-
-        # MongoDB Atlas Vector Store
         client = MongoClient(settings.MONGODB_URI)
         db = client["techmart_db"]
         collection = db["vector_knowledge_base"]
 
-        # Store documents with embeddings
+        # Enterprise storage with vector embeddings
         MongoDBAtlasVectorSearch.from_documents(
             documents=chunks,
             embedding=embeddings,
             collection=collection,
             index_name="vector_index"
         )
-
-        print(f"SUCCESS: Stored {len(chunks)} chunks in MongoDB Atlas")
+        print(f"SUCCESS: Stored {len(chunks)} chunks in MongoDB.")
         client.close()
         return True
-
     except Exception as e:
         print(f"ERROR storing in MongoDB: {e}")
         raise e
 
-
 def process_single_file(file_path: str, filename: str):
-    """Full pipeline: Load → Chunk → Embed → Store."""
-    print(f"\n{'='*50}")
-    print(f"Processing: {filename}")
-    print(f"{'='*50}")
-
-    # Step 1: Load and chunk
+    """Pipeline: Parsing -> Metadata -> Chunking -> Embedding -> Vector Store."""
+    print(f"Enterprise Processing: {filename}")
     chunks = load_and_chunk_file(file_path, filename)
-
-    # Step 2: Store in MongoDB with FastEmbed embeddings
     store_in_mongodb(chunks)
-
-    # Step 3: Cleanup temp file
+    
     if os.path.exists(file_path):
         os.remove(file_path)
-        print(f"Cleaned up temp file: {file_path}")
-
-
-def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
-    """
-    Search the knowledge base using the same FastEmbed embeddings.
-    Returns top-k relevant document chunks.
-    """
-    if not settings.MONGODB_URI:
-        return []
-
-    try:
-        embeddings = get_embeddings()
-
-        client = MongoClient(settings.MONGODB_URI)
-        db = client["techmart_db"]
-        collection = db["vector_knowledge_base"]
-
-        vector_store = MongoDBAtlasVectorSearch(
-            collection=collection,
-            embedding=embeddings,
-            index_name="vector_index"
-        )
-
-        results = vector_store.similarity_search(query, k=top_k)
-        print(f"Found {len(results)} relevant chunks for query: '{query}'")
-        client.close()
-        return results
-
-    except Exception as e:
-        print(f"ERROR searching knowledge base: {e}")
-        return []
