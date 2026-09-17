@@ -124,9 +124,11 @@ Give a clear, friendly answer."""
             response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"faq_agent": "processed"}}
         except Exception as e:
-            print(f"FAQ agent LLM error: {e}")
+            error_msg = f"LLM Error: {str(e)}"
+            print(error_msg)
+            return {"messages": [AIMessage(content=error_msg)], "agent_outputs": {"faq_agent": "processed"}}
 
-    return {"messages": [AIMessage(content="Thank you for contacting TechMart Support! How can I help you?")], "agent_outputs": {"faq_agent": "processed"}}
+    return {"messages": [AIMessage(content="API Key not found. Thank you for contacting TechMart Support!")], "agent_outputs": {"faq_agent": "processed"}}
 
 def escalation_agent(state: SupportState) -> dict:
     """Escalate to human agent."""

@@ -73,7 +73,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
 
         # MongoDB Atlas Vector Store
         client = MongoClient(settings.MONGODB_URI)
-        db = client["techmart_ai"]
+        db = client["techmart_db"]
         collection = db["vector_knowledge_base"]
 
         # Store documents with embeddings
@@ -130,7 +130,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
         )
 
         client = MongoClient(settings.MONGODB_URI)
-        db = client["techmart_ai"]
+        db = client["techmart_db"]
         collection = db["vector_knowledge_base"]
 
         vector_store = MongoDBAtlasVectorSearch(
