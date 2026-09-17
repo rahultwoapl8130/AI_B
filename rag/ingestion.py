@@ -28,7 +28,7 @@ def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
             return []
     except Exception as e:
         print(f"Error loading file {filename}: {e}")
-        return []
+        raise Exception(f"Document parsing error: {str(e)}")
 
     # Add source metadata
     for doc in documents:
@@ -52,20 +52,18 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
     and store in MongoDB Atlas Vector Search.
     """
     if not settings.MONGODB_URI:
-        print("ERROR: MONGODB_URI not set. Skipping storage.")
-        return False
+        raise Exception("ERROR: MONGODB_URI is not set in backend.")
 
     if not settings.NVIDIA_API_KEY:
-        print("ERROR: NVIDIA_API_KEY not set. Skipping storage.")
-        return False
+        raise Exception("ERROR: NVIDIA_API_KEY is not set in backend.")
 
     if not chunks:
-        print("No chunks to store.")
-        return False
+        raise Exception("No chunks to store. The document might be empty.")
 
     try:
         # NVIDIA Embeddings — NV-Embed-QA is optimized for RAG
         embeddings = NVIDIAEmbeddings(
+            model="nvidia/nv-embedqa-e5-v5",
             api_key=settings.NVIDIA_API_KEY,
             truncate="END"
         )
@@ -88,7 +86,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
 
     except Exception as e:
         print(f"ERROR storing in MongoDB: {e}")
-        return False
+        raise e
 
 
 def process_single_file(file_path: str, filename: str) -> bool:
@@ -100,7 +98,7 @@ def process_single_file(file_path: str, filename: str) -> bool:
     # Step 1: Load and chunk
     chunks = load_and_chunk_file(file_path, filename)
     if not chunks:
-        return False
+        raise Exception(f"Failed to extract text from {filename}. The file might be empty, corrupted, or unsupported.")
 
     # Step 2: Store in MongoDB with NVIDIA embeddings
     success = store_in_mongodb(chunks)
@@ -123,6 +121,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
 
     try:
         embeddings = NVIDIAEmbeddings(
+            model="nvidia/nv-embedqa-e5-v5",
             api_key=settings.NVIDIA_API_KEY,
             truncate="END"
         )

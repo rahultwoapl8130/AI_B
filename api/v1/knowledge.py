@@ -24,11 +24,8 @@ async def upload_document(background_tasks: BackgroundTasks, file: UploadFile = 
             buffer.write(content)
             
         # Process synchronously so we can catch and return actual errors to the frontend
-        success = process_single_file(file_path, file.filename)
+        process_single_file(file_path, file.filename)
         
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to process file embeddings into Vector Database. Check NVIDIA API or MongoDB URI.")
-            
         return {"message": "File uploaded and processed successfully into Vector Database!"}
         
     except Exception as e:
