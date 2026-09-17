@@ -16,7 +16,7 @@ def get_rag_context(query: str) -> str:
     """Retrieve highly relevant context using Enterprise Hybrid RAG."""
     try:
         from rag.retrieval import get_enterprise_context
-        context = get_enterprise_context(query, top_k=3)
+        context = get_enterprise_context(query, top_k=8)
         if context:
             print("Enterprise RAG: Successfully retrieved and reranked context.")
             return context
