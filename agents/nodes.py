@@ -4,50 +4,64 @@ from langchain_openai import ChatOpenAI
 from core.config import settings
 
 def get_llm():
-    """Initialize NVIDIA Llama 3 via OpenAI-compatible API."""
+    """NVIDIA Llama 3.1 via OpenAI-compatible API."""
     return ChatOpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
         api_key=settings.NVIDIA_API_KEY,
         model="meta/llama-3.1-70b-instruct",
-        temperature=0.3
+        temperature=0.3,
+        max_tokens=512
     )
 
+def get_rag_context(query: str) -> str:
+    """Retrieve relevant context from MongoDB knowledge base."""
+    try:
+        from rag.ingestion import search_knowledge_base
+        docs = search_knowledge_base(query, top_k=3)
+        if docs:
+            context = "\n\n".join([d.page_content for d in docs])
+            return f"\n\n[Knowledge Base Context]:\n{context}"
+    except Exception as e:
+        print(f"RAG search failed: {e}")
+    return ""
+
 def intent_agent(state: SupportState) -> dict:
-    """Analyzes the user's intent."""
+    """Classify user intent."""
     last_message = state["messages"][-1].content
-    
+
     if not settings.NVIDIA_API_KEY:
         intent = "faq"
-        if "refund" in last_message.lower() or "billing" in last_message.lower():
+        if any(w in last_message.lower() for w in ["refund", "billing", "payment", "invoice"]):
             intent = "billing"
-        elif "error" in last_message.lower() or "not working" in last_message.lower():
+        elif any(w in last_message.lower() for w in ["error", "not working", "bug", "crash"]):
             intent = "technical"
         return {"intent": intent, "agent_outputs": {}}
 
     try:
         llm = get_llm()
-        prompt = f"Classify this customer message into EXACTLY one word: billing, technical, complaint, or faq. Message: '{last_message}'. Reply with only one word."
+        prompt = f"""Classify this customer message into exactly one category.
+Categories: billing, technical, complaint, faq
+Message: '{last_message}'
+Reply with ONE word only."""
         response = llm.invoke(prompt)
-        intent = response.content.strip().lower()
-        if "billing" in intent: intent = "billing"
-        elif "technical" in intent: intent = "technical"
-        elif "complaint" in intent: intent = "complaint"
+        raw = response.content.strip().lower()
+        if "billing" in raw: intent = "billing"
+        elif "technical" in raw: intent = "technical"
+        elif "complaint" in raw: intent = "complaint"
         else: intent = "faq"
     except Exception:
         intent = "faq"
-    
+
     return {"intent": intent, "agent_outputs": {}}
 
 def sentiment_agent(state: SupportState) -> dict:
-    """Analyzes sentiment."""
-    last_message = state["messages"][-1].content.lower()
-    sentiment = "neutral"
-    if any(w in last_message for w in ["angry", "terrible", "awful", "hate", "worst"]):
-        sentiment = "negative"
+    """Analyze message sentiment."""
+    msg = state["messages"][-1].content.lower()
+    sentiment = "negative" if any(w in msg for w in ["angry", "terrible", "awful", "hate", "worst", "frustrated"]) else "neutral"
     return {"sentiment": sentiment}
 
 def priority_agent(state: SupportState) -> dict:
-    """Determines priority."""
+    """Determine ticket priority."""
     priority = "Normal"
     if state.get("sentiment") == "negative" or state.get("intent") == "complaint":
         priority = "High"
@@ -56,42 +70,68 @@ def priority_agent(state: SupportState) -> dict:
     return {"priority": priority}
 
 def billing_agent(state: SupportState) -> dict:
-    """Handles billing questions."""
-    last_message = state["messages"][-1].content
+    """Handle billing questions with RAG context."""
+    query = state["messages"][-1].content
+    rag_context = get_rag_context(query)
+
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            response = llm.invoke(f"You are a friendly billing support agent for TechMart. Help this customer: {last_message}")
+            prompt = f"""You are a billing support agent for TechMart e-commerce.
+Use the knowledge base context below to answer accurately.{rag_context}
+
+Customer question: {query}
+Provide a helpful, concise response."""
+            response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"billing_agent": "processed"}}
         except Exception as e:
-            pass
+            print(f"Billing agent LLM error: {e}")
+
     return {"messages": [AIMessage(content="I understand you have a billing question. Our billing team will assist you shortly.")], "agent_outputs": {"billing_agent": "processed"}}
 
 def technical_agent(state: SupportState) -> dict:
-    """Handles technical issues."""
-    last_message = state["messages"][-1].content
+    """Handle technical issues with RAG context."""
+    query = state["messages"][-1].content
+    rag_context = get_rag_context(query)
+
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            response = llm.invoke(f"You are a technical support agent for TechMart. Help troubleshoot: {last_message}")
+            prompt = f"""You are a technical support agent for TechMart e-commerce.
+Use the knowledge base context below to troubleshoot accurately.{rag_context}
+
+Customer issue: {query}
+Provide step-by-step troubleshooting help."""
+            response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"technical_agent": "processed"}}
         except Exception as e:
-            pass
-    return {"messages": [AIMessage(content="I can help you with this technical issue. Could you share more details?")], "agent_outputs": {"technical_agent": "processed"}}
+            print(f"Technical agent LLM error: {e}")
+
+    return {"messages": [AIMessage(content="I can help with this technical issue. Please share more details.")], "agent_outputs": {"technical_agent": "processed"}}
 
 def faq_agent(state: SupportState) -> dict:
-    """Handles general FAQ questions."""
-    last_message = state["messages"][-1].content
+    """Answer general questions using RAG context."""
+    query = state["messages"][-1].content
+    rag_context = get_rag_context(query)
+
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            response = llm.invoke(f"You are a helpful customer support agent for TechMart, an e-commerce platform. Answer this question helpfully: {last_message}")
+            prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
+Use the knowledge base context below to answer accurately.{rag_context}
+
+Customer question: {query}
+Give a clear, friendly answer."""
+            response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"faq_agent": "processed"}}
         except Exception as e:
-            pass
-    return {"messages": [AIMessage(content="Thank you for contacting TechMart support! How can I help you today?")], "agent_outputs": {"faq_agent": "processed"}}
+            print(f"FAQ agent LLM error: {e}")
+
+    return {"messages": [AIMessage(content="Thank you for contacting TechMart Support! How can I help you?")], "agent_outputs": {"faq_agent": "processed"}}
 
 def escalation_agent(state: SupportState) -> dict:
-    """Escalates to human."""
-    response = AIMessage(content="I understand your concern. I am escalating this to a human agent who will be with you within 24 hours.")
-    return {"messages": [response], "escalation_required": True}
+    """Escalate to human agent."""
+    return {
+        "messages": [AIMessage(content="I understand your concern and I'm escalating this to a senior agent. You will be contacted within 2 hours.")],
+        "escalation_required": True
+    }

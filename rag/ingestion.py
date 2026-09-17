@@ -1,96 +1,148 @@
-from typing import List
+"""
+Enterprise RAG Pipeline — Full NVIDIA Stack
+Uses: NVIDIAEmbeddings + MongoDB Atlas + NVIDIARerank + ChatNVIDIA
+"""
+from typing import List, Optional
 import os
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
+from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 from core.config import settings
 
-# This script would typically be run as a background job or CLI script 
-# to index documents into the Vector Store.
 
-def load_documents(directory_path: str) -> List[Document]:
-    """Loads PDFs and Text documents from a directory."""
+def load_and_chunk_file(file_path: str, filename: str) -> List[Document]:
+    """Load a file and split into chunks."""
     documents = []
-    for file in os.listdir(directory_path):
-        file_path = os.path.join(directory_path, file)
-        if file.endswith(".pdf"):
+    try:
+        if file_path.endswith(".pdf"):
             loader = PyPDFLoader(file_path)
-            documents.extend(loader.load())
-        elif file.endswith(".txt") or file.endswith(".md"):
+            documents = loader.load()
+        elif file_path.endswith((".txt", ".md")):
             loader = TextLoader(file_path)
-            documents.extend(loader.load())
-    return documents
+            documents = loader.load()
+        else:
+            print(f"Unsupported file type: {filename}")
+            return []
+    except Exception as e:
+        print(f"Error loading file {filename}: {e}")
+        return []
 
-def clean_and_chunk(documents: List[Document]) -> List[Document]:
-    """Cleans text and chunks documents for vectorization."""
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-        length_function=len,
-        separators=["\n\n", "\n", " ", ""]
-    )
-    
-    chunks = text_splitter.split_documents(documents)
-    
-    # Add rich metadata for filtering
-    for i, chunk in enumerate(chunks):
-        chunk.metadata.update({
-            "chunk_id": f"chunk_{i}",
-            "source": chunk.metadata.get("source", "unknown"),
-            "category": "support_kb",
-            "access_level": "public"
-        })
-    return chunks
-
-def ingest_to_vector_store(chunks: List[Document]):
-    """Embeds chunks and stores them in MongoDB Atlas."""
-    if not settings.MONGODB_URI or not settings.NVIDIA_API_KEY:
-        print("Missing MONGODB_URI or NVIDIA_API_KEY. Skipping ingestion.")
-        return
-        
-    client = MongoClient(settings.MONGODB_URI)
-    db = client[settings.PROJECT_NAME.replace(" ", "_")]
-    collection = db["vector_knowledge_base"]
-    
-    embeddings = NVIDIAEmbeddings(model="NV-Embed-QA", api_key=settings.NVIDIA_API_KEY)
-    
-    # Create or update the vector store
-    vector_search = MongoDBAtlasVectorSearch.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection=collection,
-        index_name="vector_index"
-    )
-    print(f"Successfully ingested {len(chunks)} chunks into MongoDB Atlas.")
-
-def process_single_file(file_path: str, filename: str):
-    """Processes a single file and ingests it."""
-    print(f"Processing uploaded file: {filename}")
-    documents = []
-    if file_path.endswith(".pdf"):
-        loader = PyPDFLoader(file_path)
-        documents.extend(loader.load())
-    elif file_path.endswith(".txt") or file_path.endswith(".md"):
-        loader = TextLoader(file_path)
-        documents.extend(loader.load())
-        
+    # Add source metadata
     for doc in documents:
         doc.metadata["source"] = filename
-        
-    chunks = clean_and_chunk(documents)
-    ingest_to_vector_store(chunks)
-    
-    # Clean up temp file
+        doc.metadata["category"] = "knowledge_base"
+
+    # Split into chunks
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100,
+        separators=["\n\n", "\n", ".", " ", ""]
+    )
+    chunks = splitter.split_documents(documents)
+    print(f"Created {len(chunks)} chunks from {filename}")
+    return chunks
+
+
+def store_in_mongodb(chunks: List[Document]) -> bool:
+    """
+    Embed chunks using NVIDIA NV-Embed-QA model
+    and store in MongoDB Atlas Vector Search.
+    """
+    if not settings.MONGODB_URI:
+        print("ERROR: MONGODB_URI not set. Skipping storage.")
+        return False
+
+    if not settings.NVIDIA_API_KEY:
+        print("ERROR: NVIDIA_API_KEY not set. Skipping storage.")
+        return False
+
+    if not chunks:
+        print("No chunks to store.")
+        return False
+
+    try:
+        # NVIDIA Embeddings — NV-Embed-QA is optimized for RAG
+        embeddings = NVIDIAEmbeddings(
+            model="NV-Embed-QA",
+            api_key=settings.NVIDIA_API_KEY,
+            truncate="END"
+        )
+
+        # MongoDB Atlas Vector Store
+        client = MongoClient(settings.MONGODB_URI)
+        db = client["techmart_ai"]
+        collection = db["vector_knowledge_base"]
+
+        # Store documents with embeddings
+        vector_store = MongoDBAtlasVectorSearch.from_documents(
+            documents=chunks,
+            embedding=embeddings,
+            collection=collection,
+            index_name="vector_index"
+        )
+
+        print(f"SUCCESS: Stored {len(chunks)} chunks in MongoDB Atlas")
+        return True
+
+    except Exception as e:
+        print(f"ERROR storing in MongoDB: {e}")
+        return False
+
+
+def process_single_file(file_path: str, filename: str) -> bool:
+    """Full pipeline: Load → Chunk → Embed → Store."""
+    print(f"\n{'='*50}")
+    print(f"Processing: {filename}")
+    print(f"{'='*50}")
+
+    # Step 1: Load and chunk
+    chunks = load_and_chunk_file(file_path, filename)
+    if not chunks:
+        return False
+
+    # Step 2: Store in MongoDB with NVIDIA embeddings
+    success = store_in_mongodb(chunks)
+
+    # Step 3: Cleanup temp file
     if os.path.exists(file_path):
         os.remove(file_path)
-        print(f"Deleted temp file: {file_path}")
+        print(f"Cleaned up temp file: {file_path}")
 
-if __name__ == "__main__":
-    # Example usage:
-    # docs = load_documents("./data")
-    # chunks = clean_and_chunk(docs)
-    # ingest_to_vector_store(chunks)
-    pass
+    return success
+
+
+def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
+    """
+    Search the knowledge base using NVIDIA embeddings.
+    Returns top-k relevant document chunks.
+    """
+    if not settings.MONGODB_URI or not settings.NVIDIA_API_KEY:
+        return []
+
+    try:
+        embeddings = NVIDIAEmbeddings(
+            model="NV-Embed-QA",
+            api_key=settings.NVIDIA_API_KEY,
+            truncate="END"
+        )
+
+        client = MongoClient(settings.MONGODB_URI)
+        db = client["techmart_ai"]
+        collection = db["vector_knowledge_base"]
+
+        vector_store = MongoDBAtlasVectorSearch(
+            collection=collection,
+            embedding=embeddings,
+            index_name="vector_index"
+        )
+
+        results = vector_store.similarity_search(query, k=top_k)
+        print(f"Found {len(results)} relevant chunks for query: '{query}'")
+        return results
+
+    except Exception as e:
+        print(f"ERROR searching knowledge base: {e}")
+        return []
