@@ -40,6 +40,7 @@ def intent_agent(state: SupportState) -> dict:
         llm = get_llm()
         prompt = f"""Classify this customer message into exactly one category.
 Categories: billing, technical, complaint, faq
+Note: For general greetings (hi, hello) or questions about identity (who are you), classify as 'faq'.
 Message: '{last_message}'
 Reply with ONE word only."""
         response = llm.invoke(prompt)
@@ -142,25 +143,27 @@ def faq_agent(state: SupportState) -> dict:
         try:
             llm = get_llm()
             if rag_context:
-                prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
-Answer the customer's question STRICTLY and ONLY using the document context provided below.
-Do NOT use any general knowledge or outside information.
-If the specific answer is not found in the context, say exactly:
-"I couldn't find information about that in our uploaded knowledge base documents. Please contact support for more help."
+                prompt = f"""You are a helpful and polite AI Support Agent for TechMart e-commerce.
+If the user asks who you are, introduce yourself as the TechMart AI Support Agent, here to help with their uploaded documents.
 
-CRITICAL: You MUST include inline citations for every fact using the exact citation block provided in the context. 
-Example format: "Carl Pei founded Nothing in 2020 (Citation: nothing marketing.pdf | Category: general | v1.0)."
+CRITICAL RULES:
+1. Answer the customer's question STRICTLY and ONLY using the document context provided below.
+2. Do NOT use any general knowledge or outside information.
+3. You MUST include inline citations for every fact using the exact citation block provided in the context. Example: (Citation: doc.pdf | Category: general | v1.0).
+4. If the specific answer is not found in the context (e.g., questions about Narendra Modi, general world facts), say exactly:
+"I am an AI assistant specifically trained on TechMart's uploaded documents. I'm sorry, but I don't have information about that in my knowledge base. Please ask me a query related to the uploaded PDFs so I can provide you with an accurate answer!"
 
 DOCUMENT CONTEXT:
 {rag_context}
 
 Customer question: {query}
-Give a clear, accurate answer with citations using ONLY the above document context."""
+Give a clear, human-like, and accurate answer using ONLY the above document context."""
             else:
-                prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
-Our knowledge base does not currently have documents relevant to this question.
-Politely respond that you don't have information about this topic in the knowledge base,
-and suggest the customer contact support directly.
+                prompt = f"""You are a helpful and polite AI Support Agent for TechMart e-commerce.
+If the user asks who you are or says hello, introduce yourself in a friendly, human-like way (e.g., "Hello! I am the TechMart AI Support Agent. I'm here to answer questions based on the documents you've uploaded.").
+
+If they ask a specific question, since there is no document context currently matching it, say:
+"I am an AI assistant specifically trained on the uploaded documents. I'm sorry, but I don't have information about that in my current knowledge base. Please ask me a query related to the uploaded PDFs so I can provide you with an accurate answer!"
 
 Do NOT answer from general knowledge.
 Customer question: {query}"""
