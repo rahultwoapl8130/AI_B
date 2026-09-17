@@ -6,7 +6,7 @@ from core.config import settings
 def get_llm():
     """NVIDIA Llama 3.1 via native ChatNVIDIA API."""
     return ChatNVIDIA(
-        model="nvidia/nemotron-3-ultra-550b-a55b",
+        model="meta/llama-3.2-11b-vision-instruct",
         api_key=settings.NVIDIA_API_KEY,
         temperature=0.3,
         max_tokens=512
