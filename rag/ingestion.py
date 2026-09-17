@@ -62,7 +62,7 @@ def store_in_mongodb(chunks: List[Document]) -> bool:
 
     try:
         embeddings = NVIDIAEmbeddings(
-            model="nvidia/llama-3.2-nv-embedqa-1b-v1",
+            model="snowflake/arctic-embed-l",
             api_key=settings.NVIDIA_API_KEY,
             truncate="END"
         )
@@ -120,7 +120,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> List[Document]:
 
     try:
         embeddings = NVIDIAEmbeddings(
-            model="nvidia/llama-3.2-nv-embedqa-1b-v1",
+            model="snowflake/arctic-embed-l",
             api_key=settings.NVIDIA_API_KEY,
             truncate="END"
         )
