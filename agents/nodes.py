@@ -4,7 +4,7 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from core.config import settings
 
 def get_llm():
-    """NVIDIA Llama 3.1 via native ChatNVIDIA API."""
+    """NVIDIA Llama 3.2 via native ChatNVIDIA API."""
     return ChatNVIDIA(
         model="meta/llama-3.2-11b-vision-instruct",
         api_key=settings.NVIDIA_API_KEY,
@@ -16,10 +16,15 @@ def get_rag_context(query: str) -> str:
     """Retrieve relevant context from MongoDB knowledge base."""
     try:
         from rag.ingestion import search_knowledge_base
-        docs = search_knowledge_base(query, top_k=3)
+        docs = search_knowledge_base(query, top_k=5)
         if docs:
-            context = "\n\n".join([d.page_content for d in docs])
-            return f"\n\n[Knowledge Base Context]:\n{context}"
+            context_parts = []
+            for i, d in enumerate(docs, 1):
+                source = d.metadata.get("source", "Knowledge Base")
+                context_parts.append(f"[Source {i}: {source}]\n{d.page_content}")
+            context = "\n\n".join(context_parts)
+            print(f"RAG: Found {len(docs)} relevant chunks")
+            return context
     except Exception as e:
         print(f"RAG search failed: {e}")
     return ""
@@ -69,18 +74,31 @@ def priority_agent(state: SupportState) -> dict:
     return {"priority": priority}
 
 def billing_agent(state: SupportState) -> dict:
-    """Handle billing questions with RAG context."""
+    """Handle billing questions — strictly uses RAG context from uploaded documents."""
     query = state["messages"][-1].content
     rag_context = get_rag_context(query)
 
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            prompt = f"""You are a billing support agent for TechMart e-commerce.
-Use the knowledge base context below to answer accurately.{rag_context}
+            if rag_context:
+                prompt = f"""You are a billing support agent for TechMart e-commerce.
+Answer the customer's question STRICTLY and ONLY using the document context provided below.
+Do NOT use any outside knowledge. If the answer is not in the context, say:
+"I don't have information about that in our current knowledge base."
+
+DOCUMENT CONTEXT:
+{rag_context}
 
 Customer question: {query}
-Provide a helpful, concise response."""
+Provide a helpful, concise response based ONLY on the above context."""
+            else:
+                prompt = f"""You are a billing support agent for TechMart e-commerce.
+You do not have any specific document context for this question.
+Politely inform the customer: "I don't have specific information about that in our knowledge base right now. 
+Please contact our billing team directly for assistance."
+
+Customer question: {query}"""
             response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"billing_agent": "processed"}}
         except Exception as e:
@@ -89,18 +107,30 @@ Provide a helpful, concise response."""
     return {"messages": [AIMessage(content="I understand you have a billing question. Our billing team will assist you shortly.")], "agent_outputs": {"billing_agent": "processed"}}
 
 def technical_agent(state: SupportState) -> dict:
-    """Handle technical issues with RAG context."""
+    """Handle technical issues — strictly uses RAG context from uploaded documents."""
     query = state["messages"][-1].content
     rag_context = get_rag_context(query)
 
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            prompt = f"""You are a technical support agent for TechMart e-commerce.
-Use the knowledge base context below to troubleshoot accurately.{rag_context}
+            if rag_context:
+                prompt = f"""You are a technical support agent for TechMart e-commerce.
+Answer the customer's question STRICTLY and ONLY using the document context provided below.
+Do NOT use any outside knowledge. If the answer is not in the context, say:
+"I don't have technical documentation for that issue in our knowledge base."
+
+DOCUMENT CONTEXT:
+{rag_context}
 
 Customer issue: {query}
-Provide step-by-step troubleshooting help."""
+Provide step-by-step help based ONLY on the above context."""
+            else:
+                prompt = f"""You are a technical support agent for TechMart e-commerce.
+You do not have specific documentation for this issue in the knowledge base.
+Politely inform the customer that you'll need to escalate or check the manuals.
+
+Customer issue: {query}"""
             response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"technical_agent": "processed"}}
         except Exception as e:
@@ -109,18 +139,33 @@ Provide step-by-step troubleshooting help."""
     return {"messages": [AIMessage(content="I can help with this technical issue. Please share more details.")], "agent_outputs": {"technical_agent": "processed"}}
 
 def faq_agent(state: SupportState) -> dict:
-    """Answer general questions using RAG context."""
+    """Answer questions — strictly uses RAG context from uploaded documents."""
     query = state["messages"][-1].content
     rag_context = get_rag_context(query)
 
     if settings.NVIDIA_API_KEY:
         try:
             llm = get_llm()
-            prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
-Use the knowledge base context below to answer accurately.{rag_context}
+            if rag_context:
+                prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
+Answer the customer's question STRICTLY and ONLY using the document context provided below.
+Do NOT use any general knowledge or outside information.
+If the specific answer is not found in the context, say exactly:
+"I couldn't find information about that in our uploaded knowledge base documents. Please contact support for more help."
+
+DOCUMENT CONTEXT:
+{rag_context}
 
 Customer question: {query}
-Give a clear, friendly answer."""
+Give a clear, accurate answer using ONLY the above document context."""
+            else:
+                prompt = f"""You are a helpful customer support agent for TechMart e-commerce.
+Our knowledge base does not currently have documents relevant to this question.
+Politely respond that you don't have information about this topic in the knowledge base,
+and suggest the customer contact support directly.
+
+Do NOT answer from general knowledge.
+Customer question: {query}"""
             response = llm.invoke(prompt)
             return {"messages": [response], "agent_outputs": {"faq_agent": "processed"}}
         except Exception as e:
